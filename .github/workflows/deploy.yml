@@ -17,12 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ---------- 关键修改：改用原生 docker login，避免中文乱码 ----------
       - name: Login to Aliyun Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
-          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login \
+            ${{ env.REGISTRY }} \
+            --username="${{ secrets.ALIYUN_REGISTRY_USER }}" \
+            --password-stdin
+      # ---------------------------------------------------------------------
 
       - name: Build & push backend services
         run: |
