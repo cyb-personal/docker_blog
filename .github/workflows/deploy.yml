@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: crpi-yk34h9goabo5hi1o.cn-hangzhou.personal.cr.aliyuncs.com
   IMAGE_NAME: cyb_pull/blog_docker
@@ -12,10 +15,10 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Login to Aliyun Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.ALIYUN_REGISTRY_USER }}
@@ -23,6 +26,7 @@ jobs:
 
       - name: Build & push backend services
         run: |
+          set -e
           for service in user-service post-service comment-service like-service gateway-service; do
             tag=${service%-service}
             echo "=== Building $service -> $tag ==="
@@ -35,6 +39,7 @@ jobs:
 
       - name: Build & push frontend
         run: |
+          set -e
           docker build \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend \
             ./frontend
@@ -45,12 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: SSH and restart services
-        uses: appleboy/ssh-action@v0.1.5
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            set -e
             cd /home/ubuntu/blog-forum
             docker compose pull
             docker compose down
