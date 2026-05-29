@@ -60,7 +60,7 @@ jobs:
           script: |
             set -e
             cd /home/ubuntu/blog-forum
-            docker compose pull
-            docker compose down
+            docker-compose pull
+            docker-compose down
             docker-compose up -d
             echo "=== Deploy complete ==="
