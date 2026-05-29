@@ -162,3 +162,127 @@ docker-compose down
 | POST | /api/like/undo | 取消点赞 |
 | GET | /api/like/count/{postId} | 点赞数 |
 | GET | /api/like/status | 点赞状态 |
+
+---
+
+## CI/CD 自动化部署
+
+通过 GitHub Actions 实现：**代码推送 → 自动构建 Docker 镜像 → 推送阿里云镜像仓库 → 自动部署到服务器**
+
+### 工作流程
+
+```
+你 git push 到 main 分支
+         │
+         ▼
+   ┌─ GitHub Actions ─────────────────────┐
+   │                                      │
+   │  Job 1: build-and-push               │
+   │   ├── 检出代码                       │
+   │   ├── 登录阿里云容器镜像服务          │
+   │   ├── 构建并推送 5 个后端镜像         │
+   │   │   (user / post / comment / like / gateway)│
+   │   └── 构建并推送前端镜像 (frontend)   │
+   │                                      │
+   │  Job 2: deploy (依赖 Job 1 完成)     │
+   │   ├── SSH 连接 Ubuntu 服务器          │
+   │   ├── docker compose pull             │
+   │   ├── docker compose down             │
+   │   └── docker compose up -d           │
+   └──────────────────────────────────────┘
+         │
+         ▼
+   部署完成 ✅
+```
+
+### 前置条件
+
+- 代码已托管到 GitHub
+- 阿里云容器镜像服务已有命名空间 `cyb_pull` 及镜像仓库 `blog_docker`
+- Ubuntu 服务器已安装 Docker + Docker Compose
+
+### 阿里云容器镜像服务准备
+
+1. 登录 https://cr.console.aliyun.com
+2. 创建命名空间（如 `cyb_pull`）
+3. 创建镜像仓库 `blog_docker`（选择"本地仓库"类型，无需绑定代码源）
+4. 在左侧"访问凭证"中获取**专用用户名**和**专用密码**（用于 `docker login`）
+
+### GitHub Secrets 配置
+
+进入 GitHub 仓库 → **Settings → Secrets and variables → Actions → New repository secret**，添加以下 6 个密钥：
+
+| Secret 名称 | 说明 |
+|---|---|
+| `ALIYUN_REGISTRY_USER` | 阿里云容器镜像服务的专用用户名（非阿里云账号） |
+| `ALIYUN_REGISTRY_PASSWORD` | 阿里云容器镜像服务的专用密码 |
+| `SERVER_HOST` | Ubuntu 服务器 IP 地址 |
+| `SERVER_USER` | Ubuntu SSH 用户名（如 `root` 或 `ubuntu`） |
+| `SERVER_SSH_KEY` | 服务器的 SSH 私钥，服务器上执行 `cat ~/.ssh/id_rsa` 获取 |
+
+### 服务器目录准备
+
+确保 Ubuntu 服务器上存在以下文件结构：
+
+```
+/home/ubuntu/blog-forum/
+├── docker-compose.yml      # 使用 image: 引用的生产配置（已提交到仓库）
+└── backend/
+    └── sql/
+        └── schema.sql      # 首次初始化数据库用
+```
+
+### 首次手动部署
+
+```bash
+# SSH 登录服务器
+ssh root@your_server_ip
+
+# 创建目录并拉取配置文件
+mkdir -p /home/ubuntu/blog-forum/backend/sql
+cd /home/ubuntu/blog-forum
+
+# 方式一：从 GitHub 拉取（推荐）
+git clone https://github.com/你的用户名/blog-forum.git .
+
+# 方式二：手动上传 docker-compose.yml 和 schema.sql
+
+# 启动服务
+docker compose pull
+docker compose up -d
+
+# 查看状态
+docker compose ps
+```
+
+### 触发自动部署
+
+推送代码到 GitHub main 分支即自动触发：
+
+```bash
+git add .
+git commit -m "feat: 新功能"
+git push origin main
+```
+
+**查看流水线状态：** GitHub 仓库 → **Actions** 标签页
+
+### 首次部署与数据持久化
+
+- 首次启动 MySQL 时，`schema.sql` 自动初始化数据库表结构和测试数据
+- MySQL 和 Redis 数据存储在 Docker 命名卷中（`mysql-data`、`redis-data`），`docker compose down` 不会丢失数据
+- 如需重置数据库，执行 `docker compose down -v`（删除卷）再启动
+
+### 常见问题
+
+**Q: 流水线运行失败，提示登录阿里云 Registry 失败？**
+
+检查 GitHub Secrets 中的 `ALIYUN_REGISTRY_USER` 和 `ALIYUN_REGISTRY_PASSWORD` 是否正确。注意这是**容器镜像服务的专用密码**，不是阿里云登录密码。在阿里云控制台 → 容器镜像服务 → 访问凭证中设置。
+
+**Q: 服务器上 docker compose pull 很慢？**
+
+首次拉取镜像可能需要一些时间。之后只有变更的镜像会增量拉取。也可以考虑在非高峰时段部署。
+
+**Q: 推送后服务器没有更新？**
+
+检查 GitHub Actions 是否运行成功，以及服务器上 `docker compose ps` 确认所有容器是否正常运行。查看日志：`docker compose logs -f`。
